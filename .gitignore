@@ -9,3 +9,6 @@ simulation/transcript
 impl/pnr/device.cfg
 *.user
 *.bak
+
+# ROM images are not ours to publish
+roms/
