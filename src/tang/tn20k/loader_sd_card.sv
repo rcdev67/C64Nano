@@ -31,6 +31,7 @@ module loader_sd_card
 	output logic        load_tap,
 	output logic        load_flt,
 	output logic        load_reu,
+	output logic        load_snd,
 	output logic        loader_busy,
 
 	output logic        ioctl_download,
@@ -61,7 +62,7 @@ logic [24:0] img_size [0:7];
 logic img_present [0:7];
 logic img_presentD [0:7];
 logic [6:0] rd_sel;
-logic [7:0] boot_flags;  // bit[1]=crt, [2]=prg, [3]=bin, [4]=tap, [5]=flt, [6]=reu, [7]=ezflash
+logic [7:0] boot_flags;  // bit[1]=crt, [2]=prg, [3]=bin, [4]=tap, [5]=flt, [6]=reu, [7]=drive sound
 logic [8:0] buf_addr;
 
 logic [31:0] loader_sd_lba;
@@ -109,6 +110,7 @@ always_ff @(posedge clk) begin
 		load_tap <= 0;
 		load_flt <= 0;
 		load_reu <= 0;
+		load_snd <= 0;
 		ioctl_download <= 0;
 		ioctl_addr <= '0;
 		addr <= '0;
@@ -169,10 +171,13 @@ always_ff @(posedge clk) begin
 					rd_sel <= 7'b0100000;
 					boot_flags[6] <= 1;
 					end
-			//else if((|img_size[7]) && ((img_present[7] && ~img_presentD[7]) || (img_present[7] && ~boot_flags[7]))) begin // EZFLASH file select
-				// unused
-				//		boot_flags[7] <= 1;
-				//		end
+			else if((|img_size[7]) && ((img_present[7] && ~img_presentD[7]) || (img_present[7] && ~boot_flags[7]))) begin
+					// drive sound set, the slot this loader has always listed as unused
+					img_select <= 7;
+					io_state <= GO4IT;
+					rd_sel <= 7'b1000000;
+					boot_flags[7] <= 1;
+					end
 			//else if((|img_size[0]) && img_present[0] && ~img_presentD[0]) begin 
 				// C1541 select
 				//		img_select <= 0;   // use for mux instead busy
@@ -186,6 +191,7 @@ always_ff @(posedge clk) begin
 						load_tap <= 0;
 						load_flt <= 0;
 						load_reu <= 0;
+						load_snd <= 0;
 					end
 			end
 
@@ -197,6 +203,7 @@ always_ff @(posedge clk) begin
 					load_tap <= rd_sel[3]; 
 					load_flt <= rd_sel[4]; 
 					load_reu <= rd_sel[5];
+					load_snd <= rd_sel[6];
 					ioctl_addr <= '0;
 					ioctl_download <= 1;
 					addr <= '0;
@@ -253,6 +260,7 @@ always_ff @(posedge clk) begin
 				load_tap <= 0;
 				load_flt <= 0;
 				load_reu <= 0;
+				load_snd <= 0;
 				loader_busy <= 0;
 				io_state <= START;
 			end

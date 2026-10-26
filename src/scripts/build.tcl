@@ -26,6 +26,7 @@ add_file misc/hid.v
 add_file misc/mcu_spi.v
 add_file misc/osd_u8g2.v
 add_file misc/scandoubler.v
+add_file misc/drive_sound.vhd
 add_file misc/sd_card.v
 add_file misc/sd_rw.v
 add_file misc/sdcmd_ctrl.v

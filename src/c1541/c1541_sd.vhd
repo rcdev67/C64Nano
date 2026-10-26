@@ -67,7 +67,18 @@ port(
     ext_en          : in std_logic;
     c1541rom_addr   : out std_logic_vector(14 downto 0);
     c1541rom_data   : in std_logic_vector(7 downto 0);
-    c1541rom_cs     : out std_logic
+    c1541rom_cs     : out std_logic;
+
+    -- What the drive sounds like, for src/misc/drive_sound.vhd. These signals
+    -- exist nowhere else: the stepper phases are internal, and a step is a
+    -- change of them rather than a signal of its own.
+    snd_motor       : out std_logic;   -- level, the spindle is turning
+    snd_disk_in     : out std_logic;   -- level, a disk is mounted
+    snd_trk_in      : out std_logic;   -- one clk32 pulse per half track
+    snd_trk_out     : out std_logic;
+    -- The stepper pulses outwards while the head already sits against the end
+    -- stop. That is the clatter of a 1541 seeking to track 1, not an error.
+    snd_head_bang   : out std_logic
 );
 end c1541_sd;
 
@@ -109,9 +120,55 @@ signal change_timer : integer;
 signal mounted : std_logic := '0';
 signal tr00_sense_n : std_logic;
 
+signal track_num_dbl_r : unsigned(6 downto 0) := (others => '0');
+signal step_evt        : std_logic := '0';
+
 begin
-	
+
 tr00_sense_n <='0' when new_track_num_dbl = to_unsigned(0, new_track_num_dbl'length) else '1';
+
+-- What the drive sounds like. Deliberately derived from the RESULT of the
+-- stepper logic below and not from its conditions: a phase change that moved
+-- the head is a step, and one that did not is the head sitting against an end
+-- stop while the stepper pulses anyway -- the clatter of a seek to track 1.
+-- Repeating those eight phase patterns here instead would be a second copy of
+-- somebody else's logic, and it would drift apart from it at the next merge.
+snd_motor   <= mtr;
+snd_disk_in <= mounted;
+
+process (clk32)
+begin
+	if rising_edge(clk32) then
+		-- stp_r is updated by the process below in the same cycle, so stp /= stp_r
+		-- marks the cycle of the phase change, and the track number it causes
+		-- only becomes visible in the cycle after it. Hence the one cycle delay.
+		track_num_dbl_r <= track_num_dbl;
+		step_evt <= '0';
+		if mtr = '1' and stp /= stp_r then
+			step_evt <= '1';
+		end if;
+
+		snd_trk_in    <= '0';
+		snd_trk_out   <= '0';
+		snd_head_bang <= '0';
+		if step_evt = '1' then
+			if track_num_dbl > track_num_dbl_r then
+				snd_trk_in <= '1';
+			elsif track_num_dbl < track_num_dbl_r then
+				snd_trk_out <= '1';
+			else
+				snd_head_bang <= '1';
+			end if;
+		end if;
+
+		if reset = '1' then
+			step_evt      <= '0';
+			snd_trk_in    <= '0';
+			snd_trk_out   <= '0';
+			snd_head_bang <= '0';
+		end if;
+	end if;
+end process;
 
   c1541 : entity work.c1541_logic
   generic map

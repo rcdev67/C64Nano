@@ -38,6 +38,7 @@ module sysctrl (
   output reg [1:0]  system_reset,
   output reg [1:0]  system_scanlines,
   output reg [1:0]  system_volume,
+  output reg [1:0]  system_drive_volume,
   output reg [1:0]  system_screen,
   output reg [1:0]  system_floppy_wprot,
   output reg [3:0]  system_port_1,
@@ -141,6 +142,7 @@ always @(posedge clk) begin
       system_reu_wrap <= 1'b0;
       system_scanlines <= 2'b00;
       system_volume <= 2'b10;
+      system_drive_volume <= 2'b10;
       system_screen <= 2'b00;
       system_floppy_wprot <= 2'b00;
       system_port_1 <= 4'b1010;
@@ -269,6 +271,7 @@ always @(posedge clk) begin
                     if(id == "S") system_scanlines <= data_in[1:0];
                     // Value "A": volume mute(0), 33%(1), 66%(2) or 100%(3)
                     if(id == "A") system_volume <= data_in[1:0];
+                    if(id == "L") system_drive_volume <= data_in[1:0];
                     // Value "W": normal (0), overscan (1) or  wide (2)
                     if(id == "W") system_screen <= data_in[1:0];
                     // Value "P": floppy write protecion None(0), A(1), B(2) both(3)
