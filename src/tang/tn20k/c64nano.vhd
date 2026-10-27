@@ -442,6 +442,20 @@ signal serial_tx_data   : std_logic_vector(7 downto 0);
 signal serial_rx_available : std_logic_vector(7 downto 0);
 signal serial_rx_strobe : std_logic;
 signal serial_rx_data   : std_logic_vector(7 downto 0);
+-- the 6551's FIFOs go either to the companion (sysctrl port 0) or to the
+-- external UART on the PMOD pins 41/51, see uart_ext_inst below
+signal uart_ext_en      : std_logic;
+signal ext_txd          : std_logic;
+signal ext_tx_strobe    : std_logic;
+signal ext_rx_strobe    : std_logic;
+signal ext_rx_data      : std_logic_vector(7 downto 0);
+signal ext_tx_available : std_logic_vector(7 downto 0);
+signal ext_bitrate      : std_logic_vector(23 downto 0);
+signal sys_tx_strobe    : std_logic;
+signal sys_rx_strobe    : std_logic;
+signal sys_rx_data      : std_logic_vector(7 downto 0);
+signal sys_tx_available : std_logic_vector(7 downto 0);
+signal sys_rx_available : std_logic_vector(7 downto 0);
 signal shift_mod        : std_logic_vector(1 downto 0);
 signal usb_key          : std_logic_vector(7 downto 0);
 signal mod_key          : std_logic;
@@ -565,7 +579,13 @@ begin
   spi_dir <= spi_io_dout;
   spi_irqn <= spi_intn;
   pmod_companion_dout <= spi_io_dout;
-  pmod_companion_intn <= spi_intn;
+  -- With the onboard BL616 the PMOD connector is free, exactly as on our ST
+  -- core: when the OSD selects "RS232 port: 6551 Ext.", pin 51 carries the
+  -- external UART's TX and pin 41 its RX, for a modem such as an ESP32 with
+  -- Zimodem. Pin 56 stays an input, since pulling it low would switch the
+  -- SPI link to an external dock -- so a companion on the PMOD header still
+  -- works when one is plugged in, and nothing of it had to go.
+  pmod_companion_intn <= ext_txd when uart_ext_en = '1' else spi_intn;
 
   ext_iec_clk  <= '1' when ext_iec_en = "00" else  -- USER_IN[2]
                     io(0) when ext_iec_en = "01" else
@@ -1367,12 +1387,12 @@ hid_inst: entity work.hid
 
   -- port io (used to expose rs232)
   port_status       => serial_status,
-  port_out_available => serial_tx_available,
-  port_out_strobe   => serial_tx_strobe,
+  port_out_available => sys_tx_available,
+  port_out_strobe   => sys_tx_strobe,
   port_out_data     => serial_tx_data,
-  port_in_available => serial_rx_available,
-  port_in_strobe    => serial_rx_strobe,
-  port_in_data      => serial_rx_data,
+  port_in_available => sys_rx_available,
+  port_in_strobe    => sys_rx_strobe,
+  port_in_data      => sys_rx_data,
 
   int_out_n           => spi_intn,
   int_in              => unsigned'(x"0" & sdc_int & '0' & hid_int & '0'),
@@ -2201,6 +2221,21 @@ begin
   end if;
 end process;
 
+-- The 6551's serial FIFOs go either to the companion MCU through sysctrl or
+-- to the external UART on the PMOD pins, selected in the OSD. The side not
+-- selected sees an empty FIFO, so the companion keeps working unchanged.
+-- This is the arrangement of our Atari ST core, and uart_ext.v is the same
+-- file: the 6551 here offers the same FIFO interface as the ST's MFP, and
+-- reports its bit rate in the same status word layout, byte swapped.
+uart_ext_en      <= '1' when system_uart = "11" else '0';
+serial_tx_strobe <= ext_tx_strobe when uart_ext_en = '1' else sys_tx_strobe;
+serial_rx_strobe <= ext_rx_strobe when uart_ext_en = '1' else sys_rx_strobe;
+serial_rx_data   <= ext_rx_data   when uart_ext_en = '1' else sys_rx_data;
+sys_tx_available <= (others => '0') when uart_ext_en = '1' else serial_tx_available;
+sys_rx_available <= (others => '0') when uart_ext_en = '1' else serial_rx_available;
+ext_tx_available <= serial_tx_available when uart_ext_en = '1' else (others => '0');
+ext_bitrate      <= serial_status(15 downto 8) & serial_status(23 downto 16) & serial_status(31 downto 24);
+
 -- |SwiftLink       $DE00/$DF00/$D700/NMI (38400 baud)
 yes_uart: if U6551 /= 0 generate
 uart_inst : entity work.glb6551
@@ -2240,6 +2275,26 @@ port map (
       i_CLOCK     => clk_sys,
       o_serialEn  => CLK_6551_EN
 );
+
+-- 32.22 MHz is the middle of the two system clocks, 31.5 for PAL and 32.94
+-- for NTSC. Either is 2.2% off, and a receiver sampling mid-bit tolerates
+-- half a bit over a ten bit frame, about 5%.
+uart_ext_inst : entity work.uart_ext
+generic map ( CLK_HZ => 32_220_000 )
+port map (
+  clk          => clk_sys,
+  resetn       => reset_n,
+  enable       => uart_ext_en,
+  bitrate      => ext_bitrate,
+  tx_available => ext_tx_available,
+  tx_data      => serial_tx_data,
+  tx_strobe    => ext_tx_strobe,
+  rx_space     => serial_rx_available,
+  rx_data      => ext_rx_data,
+  rx_strobe    => ext_rx_strobe,
+  txd          => ext_txd,
+  rxd          => pmod_companion_din
+);
 else generate
   tx_6551 <= '1';
   uart_data <= x"FF";
@@ -2248,6 +2303,10 @@ else generate
   serial_tx_available <= (others => '0');
   serial_tx_data <= (others => '0');
   serial_rx_available <= (others => '0');
+  ext_txd <= '1';
+  ext_tx_strobe <= '0';
+  ext_rx_strobe <= '0';
+  ext_rx_data <= (others => '0');
 end generate yes_uart;
 
 end Behavioral_top;
