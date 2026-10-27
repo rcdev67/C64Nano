@@ -31,13 +31,13 @@
 // Levels are set from the measured peaks after resampling. At the OSD's "Loud"
 // step, of 32767:
 //
-//   head against the end stop  peak 103  ->  about 20600
-//   step out / step in          32 / 26  ->  about 14700 / 13300
+//   head against the end stop  peak 103  ->  about 22700
+//   step out / step in          32 / 26  ->  about 20500 / 20800
 //   slip, a disk in the drive         94  ->  about  9400
 //   hum, the drive running empty      26  ->  about  2600
 //
 // "Normal", the default, is half of that. The worst case is the bang landing on
-// a slip peak of the same sign, 30000, still below the clamp; the simulation
+// a slip peak of the same sign, 32100, still below the clamp; the simulation
 // runs at "Loud" and checks it.
 //
 // How they got here, because each step was a finding on the board. The first
@@ -46,6 +46,12 @@
 // loudest sound, had taken all the headroom. It is now 2 dB down and stays the
 // loudest; the steps went up 1 to 2 dB and the running slip, which is what one
 // mostly hears, 5.4 dB. The slip stays below the steps, as on a real 1541.
+//
+// And then a whole load passed without a single clack being heard: the step
+// peaks were 1.4 times the running slip, and a short thud that little above a
+// steady noise is simply lost in it. The head channel got 6 dB more through
+// HEAD_SHIFT, the steps now stand at about twice the slip, and the bang, which
+// had the headroom to itself, came down to stay just the loudest.
 //
 // Both loops share one gain on purpose. They are on the same channel, and with
 // one gain the recording's own relation between them is kept: an empty drive is
@@ -64,9 +70,10 @@ module drive_sound #(
     parameter integer BANG_LEN      = 1088,
     parameter integer HEAD_LEN      = 3200,
     parameter [7:0]   MOTOR_GAIN    = 8'd50,  // both loops, see above
-    parameter [7:0]   STEP_IN_GAIN  = 8'd255,
-    parameter [7:0]   STEP_OUT_GAIN = 8'd230,
-    parameter [7:0]   BANG_GAIN     = 8'd100,
+    parameter [7:0]   STEP_IN_GAIN  = 8'd200,
+    parameter [7:0]   STEP_OUT_GAIN = 8'd160,
+    parameter [7:0]   BANG_GAIN     = 8'd55,
+    parameter integer HEAD_SHIFT    = 9,      // the head channel's extra 6 dB
     parameter integer OUT_SHIFT     = 7,
     // 150 ms of motor tail in samples, to bridge the gaps of a load
     parameter integer MOTOR_TAIL    = 1654
@@ -212,7 +219,7 @@ wire [7:0] h_gain = !head_active     ? 8'd0          :
                     (head_snd == 1)  ? STEP_OUT_GAIN : BANG_GAIN;
 
 wire signed [25:0] m_mul = motor_s * $signed({1'b0, MOTOR_GAIN}) * $signed({1'b0, motor_env});
-wire signed [25:0] h_mul = (head_s * $signed({1'b0, h_gain})) <<< 8;
+wire signed [25:0] h_mul = (head_s * $signed({1'b0, h_gain})) <<< HEAD_SHIFT;
 wire signed [25:0] sum   = (m_mul + h_mul) >>> OUT_SHIFT;
 
 // volume 0 mutes entirely, so it can be switched off from the OSD

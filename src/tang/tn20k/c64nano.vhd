@@ -355,6 +355,7 @@ signal load_reu        : std_logic := '0';
 signal load_tap        : std_logic := '0';
 signal tap_play_addr   : unsigned(22 downto 0);
 signal reset_wait      : std_logic := '0';
+signal prg_reset       : std_logic := '0';   -- the C64 is reset for a PRG, the drive is not
 signal old_download_r  : std_logic;
 
 signal reset_n         : std_logic;
@@ -669,7 +670,13 @@ process(clk_sys)
   end if;
 end process;
 
-disk_reset <= '1' when not flash_ready or disk_pause or c1541_osd_reset or not reset_n or por or c1541_reset else '0';
+-- The reset that precedes a PRG injection leaves the drive alone. It used to
+-- reset the 1541 along with the C64, and the program the injection then starts
+-- comes up while the drive is still booting: CCGMS, started that way, could not
+-- save its settings and read a directory as garbage, while loaded with LOAD
+-- from the same disk it does both. The reset also threw away a track the drive
+-- had not written back yet.
+disk_reset <= '1' when not flash_ready or disk_pause or c1541_osd_reset or (not reset_n and not prg_reset) or por or c1541_reset else '0';
 
 -- rising edge sd_change triggers detection of new disk
 process(clk_sys)
@@ -2047,13 +2054,16 @@ process(clk_sys)
           do_erase <= '1';
         end if;
       reset_counter <= 100000;
+      prg_reset <= '0';
       elsif old_download_r = '0' and ioctl_download = '1' and load_prg = '1' then
         do_erase <= '1';
         reset_wait <= '1';
         reset_counter <= 255;
+        prg_reset <= '1';
       elsif ioctl_download = '1' and (load_crt or load_rom) = '1' then
         do_erase <= '1';
         reset_counter <= 255;
+        prg_reset <= '0';
       elsif erasing = '1' then 
         force_erase <= '0';
       elsif reset_counter = 0 then

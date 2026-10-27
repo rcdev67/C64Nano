@@ -27,7 +27,8 @@ import wave
 
 LOOP_BITS = 11
 STEP_IN_LEN, STEP_OUT_OFF, STEP_OUT_LEN, BANG_OFF, BANG_LEN = 1024, 1024, 1088, 2112, 1088
-MOTOR_GAIN, STEP_IN_GAIN, STEP_OUT_GAIN, BANG_GAIN = 50, 255, 230, 100
+MOTOR_GAIN, STEP_IN_GAIN, STEP_OUT_GAIN, BANG_GAIN = 50, 200, 160, 55
+HEAD_SHIFT = 9
 OUT_SHIFT, MOTOR_TAIL, VOLUME = 7, 1654, 3      # the testbench sets volume 3
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -61,7 +62,7 @@ def main(log):
 
         # the output, from the state before this tick
         hg = 0 if not hact else (STEP_IN_GAIN, STEP_OUT_GAIN, BANG_GAIN)[min(hsnd, 2)]
-        s = (ms * MOTOR_GAIN * env + ((hs * hg) << 8)) >> OUT_SHIFT
+        s = (ms * MOTOR_GAIN * env + ((hs * hg) << HEAD_SHIFT)) >> OUT_SHIFT
         s = 0 if VOLUME == 0 else s >> 2 if VOLUME == 1 else s >> 1 if VOLUME == 2 else s
         snd = max(-32768, min(32767, s))
         peak = max(peak, abs(snd))
