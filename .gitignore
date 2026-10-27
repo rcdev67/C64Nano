@@ -12,3 +12,4 @@ impl/pnr/device.cfg
 
 # ROM images are not ours to publish
 roms/
+preview_1541.wav
