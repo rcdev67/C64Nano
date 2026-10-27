@@ -270,6 +270,7 @@ signal snd_tick_div   : unsigned(10 downto 0);
 signal drive_snd      : signed(15 downto 0);
 signal system_drive_volume : std_logic_vector(1 downto 0);
 signal load_snd       : std_logic := '0';
+signal snd_ready      : std_logic := '0';
 signal reu_ram_addr   : unsigned(22 downto 0);
 signal reu_ram_dout   : unsigned(7 downto 0);
 signal reu_ram_we     : std_logic;
@@ -1652,13 +1653,13 @@ port map (
   reset        => not reset_n,
   tick_div     => snd_tick_div,
   -- an empty drive hums, a disk in it slips against its sleeve
-  en_hum       => snd_motor and not snd_disk_in,
-  en_slip      => snd_motor and snd_disk_in,
-  do_trk_in    => snd_trk_in,
-  do_trk_out   => snd_trk_out,
-  do_head_bang => snd_head_bang,
-  do_insert    => snd_insert,
-  do_remove    => snd_remove,
+  en_hum       => snd_ready and snd_motor and not snd_disk_in,
+  en_slip      => snd_ready and snd_motor and snd_disk_in,
+  do_trk_in    => snd_ready and snd_trk_in,
+  do_trk_out   => snd_ready and snd_trk_out,
+  do_head_bang => snd_ready and snd_head_bang,
+  do_insert    => snd_ready and snd_insert,
+  do_remove    => snd_ready and snd_remove,
   volume       => unsigned(system_drive_volume),
   ram_req      => snd_ram_req,
   ram_addr     => snd_ram_addr,
@@ -1945,6 +1946,16 @@ begin
     if old_download /= ioctl_download and load_crt = '1' then
       cart_attached <= old_download;
       erase_cram <= '1';
+    end if;
+
+    -- Drive sound set loaded. Until it is, the player must stay quiet: nothing
+    -- lives at SND_ADDR before the download, and playing that back sounds like
+    -- a shrill hiss rather than like nothing at all. The companion mounts no
+    -- image on its own -- a file selector's "default" only tells it which
+    -- directory to open -- so an unmounted set is the normal state after a
+    -- fresh flash, not an error.
+    if old_download /= ioctl_download and load_snd = '1' then
+      snd_ready <= old_download;
     end if;
 
     -- meminit for RAM injection

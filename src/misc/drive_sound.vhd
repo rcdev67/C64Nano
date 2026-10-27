@@ -125,11 +125,17 @@ begin
 
     ram_addr <= SND_ADDR + resize(addr_i, SND_ADDR'length);
 
-    -- The head is 16 times the motor. That is Gideon's weighting, and the
-    -- recordings bear it out: the hum peaks at +-29, the head against the end
-    -- stop at -128. A 1541 seeking to track 1 is what the machine sounds like
-    -- from the next room; the hum is the background to it.
-    mix <= resize(motor_sample, mix'length)
+    -- The head channel is 16 times the motor one, which is Gideon's weighting,
+    -- and the recordings bear out why: the hum peaks at +-29 and the head
+    -- against the end stop at -128. The clatter is what a 1541 sounds like from
+    -- the next room and the hum is only the background to it.
+    --
+    -- The motor gets another factor of 8 that he does not give it, because his
+    -- output path is not ours. Weighted 1:16 against a 16 bit mixer that also
+    -- carries the SID, the hum came out at about -49 dB and was simply not
+    -- there. This compresses the span from roughly 70:1 to 9:1 -- the clatter
+    -- still dominates by some 19 dB, and the hum survives next to the music.
+    mix <= shift_left(resize(motor_sample, mix'length), 3)
            + shift_left(resize(head_sample, mix'length), 4);
 
     gain <= to_signed(0, gain'length)   when volume = "00" else
