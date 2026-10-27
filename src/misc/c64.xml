@@ -305,8 +305,6 @@
       <fileselector label="TAP TAPE:" ext="tap" index="4"/>
       <fileselector label="FLT FILTER:" ext="flt" index="5"/>
       <fileselector label="REU:" ext="reu" index="6"/>
-      <!-- slot 7: the drive sound set, snds1541.bin from the 1541 Ultimate -->
-      <fileselector label="Drive sound:" ext="bin" index="7" default="snds1541.bin"/>
       <!--NOT tang_nano20k tang_nano20k_lcd -->
       <button label="Save EZFLASH" action="save_cartridge_hide"/>
       <!--END-->

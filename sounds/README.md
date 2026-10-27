@@ -38,12 +38,26 @@ in, because the disk rubs against the liner of its sleeve. That is two looped
 sounds, not one.
 
 **The head banging against the end stop is the loudest thing in the set**, by a
-wide margin, and the player scales the head channel by 16 on top of that. That
-is not a mistake: the clatter of a 1541 seeking to track 1 is what the machine
-actually sounds like from the next room, and the hum is only a background to it.
+wide margin, and the player keeps it that way: its gains are set per sound from
+these measured peaks, so the bang lands near 13000 of 32767 in the mixer while
+the hum sits around 2500. That is not a mistake. The clatter of a 1541 seeking
+to track 1 is what the machine actually sounds like from the next room, and the
+hum is only a background to it.
 
 ## How it gets into the machine
 
-The file goes on the SD card. The companion loads it like any other image, into
-the SDRAM, and `src/misc/drive_sound.vhd` plays it from there -- see that file's
-header for why it is not held in block RAM.
+It does not go on the SD card. `make_hex.py` resamples it to 11025 Hz and writes
+`src/misc/drive_motor.hex` and `src/misc/drive_head.hex`, which
+`src/misc/drive_sound.v` reads into block RAM at synthesis. Those two files are
+generated -- change the script, never them.
+
+Five of the seven sounds survive that: the hum, both steps and the head bang.
+The disk-slipping loop and the insert and remove sounds are dropped, because the
+core leaves exactly four of its 46 block RAMs free and this is what fits in them
+at a rate that keeps a step sounding like a step.
+
+The first attempt did load the file from the card into the SDRAM and read it
+back through the DMA time slot. It played noise, for a reason an evening of
+building and flashing did not find, and it needed the set mounted by hand
+before anything made a sound at all. The samples are 5405 bytes after
+resampling. They belong in the bitstream.

@@ -253,24 +253,15 @@ signal dma_din        : unsigned(7 downto 0);
 signal dma_we         : std_logic;
 signal ext_cycle      : std_logic;
 signal ext_cycle_d    : std_logic;
--- 1541 drive sound: what the drive does, the player's slot on the SDRAM port
--- and the sample it hands to the mixer
+-- 1541 drive sound: what the drive does, and the sample it hands to the mixer.
+-- The recordings are in the bitstream, so there is no transport to arrange.
 signal snd_motor      : std_logic;
-signal snd_disk_in    : std_logic;
 signal snd_trk_in     : std_logic;
 signal snd_trk_out    : std_logic;
 signal snd_head_bang  : std_logic;
-signal snd_insert     : std_logic := '0';
-signal snd_remove     : std_logic := '0';
-signal snd_change_d   : std_logic := '0';
-signal snd_ram_req    : std_logic;
-signal snd_ram_ce     : std_logic;
-signal snd_ram_addr   : unsigned(22 downto 0);
-signal snd_tick_div   : unsigned(10 downto 0);
+signal snd_tick_div   : unsigned(11 downto 0);
 signal drive_snd      : signed(15 downto 0);
 signal system_drive_volume : std_logic_vector(1 downto 0);
-signal load_snd       : std_logic := '0';
-signal snd_ready      : std_logic := '0';
 signal reu_ram_addr   : unsigned(22 downto 0);
 signal reu_ram_dout   : unsigned(7 downto 0);
 signal reu_ram_we     : std_logic;
@@ -491,9 +482,6 @@ constant CRT_ADDR      : unsigned(22 downto 0) := 23x"0200000";-- Cartridge: 2M
 constant TAP_ADDR      : unsigned(22 downto 0) := 23x"0400000";-- Tape buffer
 constant GEO_ADDR      : unsigned(22 downto 0) := 23x"0400000";-- GeoRAM: 4M
 constant REU_ADDR      : unsigned(22 downto 0) := 23x"0600000";-- REU: 2M !!!
--- The drive sound set, 46336 bytes, in the gap between the cartridge RAM at
--- 0x010000 and the cartridge at 0x200000. Nothing else uses it.
-constant SND_ADDR      : unsigned(22 downto 0) := 23x"0020000";
 -- TAP, REU and GEORAM and overlap with TAP load due to TN20k DRAM constrains (mutual exclusive)
 
 component CLKDIV
@@ -754,7 +742,6 @@ yes_c1541: if C1541 /= 0 generate
       c1541rom_data => c1541rom_data,
 
       snd_motor     => snd_motor,
-      snd_disk_in   => snd_disk_in,
       snd_trk_in    => snd_trk_in,
       snd_trk_out   => snd_trk_out,
       snd_head_bang => snd_head_bang
@@ -772,7 +759,6 @@ else generate
 	drive_iec_clk_o <= '1';
   ext_en <= '0';
   snd_motor <= '0';
-  snd_disk_in <= '0';
   snd_trk_in <= '0';
   snd_trk_out <= '0';
   snd_head_bang <= '0';
@@ -956,8 +942,6 @@ addr <= cart_addr
         io_cycle_addr
            when io_cycle = '1' else
         reu_ram_addr
-           when ext_cycle = '1' and dma_req = '1' else
-        snd_ram_addr
            when ext_cycle = '1' else
         cart_addr;
 
@@ -966,8 +950,6 @@ cs <= cart_ce
       io_cycle_ce
          when io_cycle = '1' else
       reu_ram_ce
-         when ext_cycle = '1' and dma_req = '1' else
-      snd_ram_ce
          when ext_cycle = '1' else
       cart_ce;
 
@@ -976,8 +958,6 @@ we <= cart_we
       io_cycle_we
          when io_cycle = '1' else
       reu_ram_we
-         when ext_cycle = '1' and dma_req = '1' else
-      '0'
          when ext_cycle = '1' else
       cart_we;
 
@@ -986,8 +966,6 @@ din <= cart_wrdata
        io_cycle_data
            when io_cycle = '1' else
        reu_ram_dout
-           when ext_cycle = '1' and dma_req = '1' else
-       (others => '0')
            when ext_cycle = '1' else
        cart_wrdata;
 
@@ -1572,10 +1550,6 @@ end process;
 
 reu_oe  <= '1' when IOF = '1' and reu_cfg /= "00" else '0';
 reu_ram_ce <= not ext_cycle_d and ext_cycle and dma_req;
--- The REU keeps the slot whenever it wants it, and the drive sound simply
--- waits for the next window. There are about a million of them a second and
--- it asks for 44100, so waiting costs it nothing.
-snd_ram_ce <= not ext_cycle_d and ext_cycle and snd_ram_req and not dma_req;
 
 yes_reu: if REU /= 0 generate
 reu_inst: entity work.reu
@@ -1622,50 +1596,23 @@ else generate
 end generate yes_reu;
 
 -- 1541 drive sound. The core runs at a different clock for PAL and NTSC, so
--- the divider for the 22050 Hz sample rate is a signal and not a constant:
--- 31.5 MHz / 22050 = 1429 and 32.94 MHz / 22050 = 1494, each one less because
+-- the divider for the 11025 Hz sample rate is a signal and not a constant:
+-- 31.5 MHz / 11025 = 2857 and 32.94 MHz / 11025 = 2988, each one less because
 -- the counter runs down through zero.
-snd_tick_div <= to_unsigned(1493, snd_tick_div'length) when ntscMode = '1'
-                else to_unsigned(1428, snd_tick_div'length);
-
-process(clk_sys)
-begin
-  if rising_edge(clk_sys) then
-    snd_change_d <= sd_change;
-    snd_insert <= '0';
-    snd_remove <= '0';
-    if sd_change = '1' and snd_change_d = '0' then
-      if img_present = '1' then
-        snd_insert <= '1';
-      else
-        snd_remove <= '1';
-      end if;
-    end if;
-  end if;
-end process;
+snd_tick_div <= to_unsigned(2987, snd_tick_div'length) when ntscMode = '1'
+                else to_unsigned(2856, snd_tick_div'length);
 
 drive_sound_inst: entity work.drive_sound
-generic map (
-  SND_ADDR => unsigned'(SND_ADDR)
-)
 port map (
   clk          => clk_sys,
-  reset        => not reset_n,
+  resetn       => reset_n,
   tick_div     => snd_tick_div,
-  -- an empty drive hums, a disk in it slips against its sleeve
-  en_hum       => snd_ready and snd_motor and not snd_disk_in,
-  en_slip      => snd_ready and snd_motor and snd_disk_in,
-  do_trk_in    => snd_ready and snd_trk_in,
-  do_trk_out   => snd_ready and snd_trk_out,
-  do_head_bang => snd_ready and snd_head_bang,
-  do_insert    => snd_ready and snd_insert,
-  do_remove    => snd_ready and snd_remove,
+  motor_on     => snd_motor,
+  step_in      => snd_trk_in,
+  step_out     => snd_trk_out,
+  head_bang    => snd_head_bang,
   volume       => unsigned(system_drive_volume),
-  ram_req      => snd_ram_req,
-  ram_addr     => snd_ram_addr,
-  ram_grant    => snd_ram_ce,
-  ram_din      => sdram_data,
-  sample_out   => drive_snd
+  snd          => drive_snd
 );
 
 -- c1541 ROM's SPI Flash
@@ -1802,7 +1749,6 @@ port map (
   load_tap          => load_tap,
   load_flt          => load_flt,
   load_reu          => load_reu,
-  load_snd          => load_snd,
   sd_img_size       => sd_img_size,
 
   ioctl_download    => ioctl_download,
@@ -1934,10 +1880,6 @@ begin
       elsif load_reu = '1' then
         if ioctl_addr = to_unsigned(0, ioctl_addr'length) then ioctl_load_addr <= REU_ADDR; end if;
         ioctl_req_wr <= '1';
-
-      elsif load_snd = '1' then
-        if ioctl_addr = to_unsigned(0, ioctl_addr'length) then ioctl_load_addr <= SND_ADDR; end if;
-        ioctl_req_wr <= '1';
       end if;
 
     end if;
@@ -1948,15 +1890,6 @@ begin
       erase_cram <= '1';
     end if;
 
-    -- Drive sound set loaded. Until it is, the player must stay quiet: nothing
-    -- lives at SND_ADDR before the download, and playing that back sounds like
-    -- a shrill hiss rather than like nothing at all. The companion mounts no
-    -- image on its own -- a file selector's "default" only tells it which
-    -- directory to open -- so an unmounted set is the normal state after a
-    -- fresh flash, not an error.
-    if old_download /= ioctl_download and load_snd = '1' then
-      snd_ready <= old_download;
-    end if;
 
     -- meminit for RAM injection
     if old_download /= ioctl_download and load_prg = '1' and inj_meminit = '0' then

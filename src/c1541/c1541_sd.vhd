@@ -73,7 +73,6 @@ port(
     -- exist nowhere else: the stepper phases are internal, and a step is a
     -- change of them rather than a signal of its own.
     snd_motor       : out std_logic;   -- level, the spindle is turning
-    snd_disk_in     : out std_logic;   -- level, a disk is mounted
     snd_trk_in      : out std_logic;   -- one clk32 pulse per half track
     snd_trk_out     : out std_logic;
     -- The stepper pulses outwards while the head already sits against the end
@@ -134,7 +133,6 @@ tr00_sense_n <='0' when new_track_num_dbl = to_unsigned(0, new_track_num_dbl'len
 -- Repeating those eight phase patterns here instead would be a second copy of
 -- somebody else's logic, and it would drift apart from it at the next merge.
 snd_motor   <= mtr;
-snd_disk_in <= mounted;
 
 process (clk32)
 begin
