@@ -28,17 +28,23 @@
 // power of two, the loop counter wraps by itself: there is no comparison here
 // that could be wrong, which matters after an evening spent suspecting one.
 //
-// Levels are set from the measured peaks after resampling:
+// Levels are set from the measured peaks after resampling, and they hold at the
+// OSD's default step, "Normal":
 //
 //   head against the end stop  peak 103  ->  about 13000 of 32767
 //   step out / step in          32 / 26  ->  about  6000
 //   slip, a disk in the drive         94  ->  about  2500
 //   hum, the drive running empty      26  ->  about   700
 //
+// "Loud" doubles them, with the head bang peaking near 26000 -- still below the
+// clamp, which the simulation checks. An earlier version reached these levels
+// only at "Loud", so the default played everything at half, and below the
+// machine's own 66% master volume the slip came out around -32 dB: very quiet,
+// and the first thing anybody heard on the board.
+//
 // Both loops share one gain on purpose. They are on the same channel, and with
 // one gain the recording's own relation between them is kept: an empty drive is
-// quiet, a loaded one is clearly there. The 2500 for the slip is where the hum
-// sat in the previous version, which was audible without being in the way.
+// quiet, a loaded one is clearly there.
 //
 // A 1541 seek is a run of distinct clacks, not a buzz, so a new step simply
 // restarts the one-shot. That is why there is no continuous seek sound here as
@@ -56,7 +62,7 @@ module drive_sound #(
     parameter [7:0]   STEP_IN_GAIN  = 8'd231,
     parameter [7:0]   STEP_OUT_GAIN = 8'd188,
     parameter [7:0]   BANG_GAIN     = 8'd126,
-    parameter integer OUT_SHIFT     = 8,
+    parameter integer OUT_SHIFT     = 7,
     // 150 ms of motor tail in samples, to bridge the gaps of a load
     parameter integer MOTOR_TAIL    = 1654
 ) (
