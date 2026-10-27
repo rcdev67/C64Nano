@@ -28,19 +28,24 @@
 // power of two, the loop counter wraps by itself: there is no comparison here
 // that could be wrong, which matters after an evening spent suspecting one.
 //
-// Levels are set from the measured peaks after resampling, and they hold at the
-// OSD's default step, "Normal":
+// Levels are set from the measured peaks after resampling. At the OSD's "Loud"
+// step, of 32767:
 //
-//   head against the end stop  peak 103  ->  about 13000 of 32767
-//   step out / step in          32 / 26  ->  about  6000
-//   slip, a disk in the drive         94  ->  about  2500
-//   hum, the drive running empty      26  ->  about   700
+//   head against the end stop  peak 103  ->  about 20600
+//   step out / step in          32 / 26  ->  about 14700 / 13300
+//   slip, a disk in the drive         94  ->  about  9400
+//   hum, the drive running empty      26  ->  about  2600
 //
-// "Loud" doubles them, with the head bang peaking near 26000 -- still below the
-// clamp, which the simulation checks. An earlier version reached these levels
-// only at "Loud", so the default played everything at half, and below the
-// machine's own 66% master volume the slip came out around -32 dB: very quiet,
-// and the first thing anybody heard on the board.
+// "Normal", the default, is half of that. The worst case is the bang landing on
+// a slip peak of the same sign, 30000, still below the clamp; the simulation
+// runs at "Loud" and checks it.
+//
+// How they got here, because each step was a finding on the board. The first
+// levels held only at "Loud", and the default halved them. Then, at "Loud" with
+// the monitor at full volume, it was still too quiet -- the head bang, by far the
+// loudest sound, had taken all the headroom. It is now 2 dB down and stays the
+// loudest; the steps went up 1 to 2 dB and the running slip, which is what one
+// mostly hears, 5.4 dB. The slip stays below the steps, as on a real 1541.
 //
 // Both loops share one gain on purpose. They are on the same channel, and with
 // one gain the recording's own relation between them is kept: an empty drive is
@@ -58,10 +63,10 @@ module drive_sound #(
     parameter integer BANG_OFF      = 2112,
     parameter integer BANG_LEN      = 1088,
     parameter integer HEAD_LEN      = 3200,
-    parameter [7:0]   MOTOR_GAIN    = 8'd27,  // both loops, see above
-    parameter [7:0]   STEP_IN_GAIN  = 8'd231,
-    parameter [7:0]   STEP_OUT_GAIN = 8'd188,
-    parameter [7:0]   BANG_GAIN     = 8'd126,
+    parameter [7:0]   MOTOR_GAIN    = 8'd50,  // both loops, see above
+    parameter [7:0]   STEP_IN_GAIN  = 8'd255,
+    parameter [7:0]   STEP_OUT_GAIN = 8'd230,
+    parameter [7:0]   BANG_GAIN     = 8'd100,
     parameter integer OUT_SHIFT     = 7,
     // 150 ms of motor tail in samples, to bridge the gaps of a load
     parameter integer MOTOR_TAIL    = 1654
