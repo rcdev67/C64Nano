@@ -51,10 +51,19 @@ It does not go on the SD card. `make_hex.py` resamples it to 11025 Hz and writes
 `src/misc/drive_sound.v` reads into block RAM at synthesis. Those two files are
 generated -- change the script, never them.
 
-Five of the seven sounds survive that: the hum, both steps and the head bang.
-The disk-slipping loop and the insert and remove sounds are dropped, because the
-core leaves exactly four of its 46 block RAMs free and this is what fits in them
-at a rate that keeps a step sounding like a step.
+Five of the seven sounds survive that: both loops, both steps and the head
+bang. Only the insert and remove sounds are dropped. The core leaves exactly
+four of its 46 block RAMs free, two per memory, and the loops are cut from 200
+to 186 ms -- 2048 samples each -- so that both fit the motor memory exactly,
+with the remainder crossfaded into the start so the seam does not click.
+
+Both loops matter. A first version kept only the hum, and that was the wrong
+one to keep: the hum is what an empty drive makes, and a disk is always in
+while something loads.
+
+`simulation/drive_sound/run.cmd` runs the player in iverilog against a model
+of its own registers and writes `drive_sound.wav`, which is what the board has
+to sound like. Run it before flashing a change.
 
 The first attempt did load the file from the card into the SDRAM and read it
 back through the DMA time slot. It played noise, for a reason an evening of

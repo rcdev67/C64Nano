@@ -11,45 +11,48 @@
 // latching step pulses, bridging the gaps of a load and keeping the output off
 // the critical path is all hard won and kept here.
 //
-// The samples live in the bitstream, not in the SDRAM. The first attempt loaded
+// The samples live in the bitstream, not in the SDRAM. A first attempt loaded
 // them from the SD card into the SDRAM and read them back through the DMA time
-// slot, which reads garbage for reasons we never found -- three evenings of
-// flashing to chase a transport that this design does not need. Four of the
-// 46 block RAMs were free, and the set fits:
+// slot; it read noise, for a reason never found, and the transport is a part
+// this design does not need. The core left four of its 46 block RAMs free, and
+// the set fits them exactly:
 //
-//   drive_motor.hex  2205 bytes  the hum, looped          2 blocks
-//   drive_head.hex   3200 bytes  step in, step out, bang  2 blocks
+//   drive_motor.hex  hum | slip, 2048 + 2048  two loops       2 blocks
+//   drive_head.hex   step in | step out | bang one-shots      2 blocks
 //
-// That is what 11025 Hz buys. 22050 Hz needs seven blocks and 8000 Hz fits
-// everything including the disk-slipping loop, but at 8 kHz the averaging
-// filter takes the bite out of a step -- its peak drops from 26 to 13 -- and a
-// clack is the sound this whole thing exists for. So the slipping loop is the
-// one that goes, and the drive hums whether or not a disk is in it.
+// Two loops, because they are not interchangeable. The original player picks
+// the hum when the drive runs empty and the slipping sound when a disk is in --
+// the disk rubs against the liner of its sleeve -- and a disk is always in while
+// something loads. 2048 samples each is 186 ms at 11025 Hz, cut from 200 ms with
+// the remainder crossfaded into the start so the seam does not click. Being a
+// power of two, the loop counter wraps by itself: there is no comparison here
+// that could be wrong, which matters after an evening spent suspecting one.
 //
-// Resampled with an averaging filter rather than by picking every n-th sample:
-// the set has content above 5 kHz and dropping samples folds it back down,
-// which is heard as a hiss. We have had enough of that.
-//
-// Levels are set per sound from the measured peaks, so that the clatter leads
-// and the hum stays underneath it:
+// Levels are set from the measured peaks after resampling:
 //
 //   head against the end stop  peak 103  ->  about 13000 of 32767
 //   step out / step in          32 / 26  ->  about  6000
-//   hum                               27  ->  about  2500
+//   slip, a disk in the drive         94  ->  about  2500
+//   hum, the drive running empty      26  ->  about   700
+//
+// Both loops share one gain on purpose. They are on the same channel, and with
+// one gain the recording's own relation between them is kept: an empty drive is
+// quiet, a loaded one is clearly there. The 2500 for the slip is where the hum
+// sat in the previous version, which was audible without being in the way.
 //
 // A 1541 seek is a run of distinct clacks, not a buzz, so a new step simply
 // restarts the one-shot. That is why there is no continuous seek sound here as
 // there is in the ST player: a 5.25" stepper does not produce one.
 //
 module drive_sound #(
-    parameter integer HUM_LEN       = 2205,   // the looped hum
+    parameter integer LOOP_BITS     = 11,     // 2048 samples per loop
     parameter integer STEP_IN_LEN   = 1024,   // head_rom: 0 .. STEP_IN_LEN-1
     parameter integer STEP_OUT_OFF  = 1024,
     parameter integer STEP_OUT_LEN  = 1088,
     parameter integer BANG_OFF      = 2112,
     parameter integer BANG_LEN      = 1088,
     parameter integer HEAD_LEN      = 3200,
-    parameter [7:0]   HUM_GAIN      = 8'd93,
+    parameter [7:0]   MOTOR_GAIN    = 8'd27,  // both loops, see above
     parameter [7:0]   STEP_IN_GAIN  = 8'd231,
     parameter [7:0]   STEP_OUT_GAIN = 8'd188,
     parameter [7:0]   BANG_GAIN     = 8'd126,
@@ -65,6 +68,7 @@ module drive_sound #(
     input              [11:0] tick_div,
 
     input                     motor_on,    // level, the spindle is turning
+    input                     disk_in,     // level, a disk is mounted
     input                     step_in,     // one clk pulse per half track
     input                     step_out,
     input                     head_bang,   // stepper pulses against the stop
@@ -75,7 +79,7 @@ module drive_sound #(
 );
 
 // ---------------------------------------------------------------- samples --
-reg signed [7:0] motor_rom [0:HUM_LEN-1];
+reg signed [7:0] motor_rom [0:(2<<LOOP_BITS)-1];
 reg signed [7:0] head_rom  [0:HEAD_LEN-1];
 initial begin
     $readmemh("../../misc/drive_motor.hex", motor_rom);
@@ -143,15 +147,15 @@ always @(posedge clk) begin
 end
 
 // -------------------------------------------------------- sample playback --
-reg [11:0] motor_pos;
-reg [11:0] head_pos;
-reg  [1:0] head_snd;      // 0 = step in, 1 = step out, 2 = bang
-reg        head_active;
-reg signed [7:0] motor_s, head_s;
+reg [LOOP_BITS-1:0] motor_pos;     // wraps by itself
+reg          [11:0] head_pos;
+reg           [1:0] head_snd;      // 0 = step in, 1 = step out, 2 = bang
+reg                 head_active;
+reg signed    [7:0] motor_s, head_s;
 
 always @(posedge clk) begin
     if(!resetn) begin
-        motor_pos   <= 12'd0;
+        motor_pos   <= {LOOP_BITS{1'b0}};
         head_pos    <= 12'd0;
         head_snd    <= 2'd0;
         head_active <= 1'b0;
@@ -160,14 +164,13 @@ always @(posedge clk) begin
     end else if(tick) begin
         // Read unconditionally, so this infers a block RAM rather than logic.
         // An idle head channel is silenced through its gain, not by not reading.
-        motor_s <= motor_rom[motor_pos];
+        // The upper address bit picks the loop: hum below, slip above.
+        motor_s <= motor_rom[{disk_in, motor_pos}];
         head_s  <= head_rom[head_pos];
 
-        // ---- motor: loop the hum ---------------------------------------
-        if(motor_hold != 0)
-            motor_pos <= (motor_pos == HUM_LEN[11:0] - 12'd1) ? 12'd0 : motor_pos + 12'd1;
-        else
-            motor_pos <= 12'd0;
+        // ---- motor: loop, restarting from the top when it starts turning --
+        if(motor_hold != 0) motor_pos <= motor_pos + 1'b1;
+        else                motor_pos <= {LOOP_BITS{1'b0}};
 
         // ---- head: one shot, and a new step restarts it -----------------
         if(bang_seen) begin
@@ -197,7 +200,7 @@ wire [7:0] h_gain = !head_active     ? 8'd0          :
                     (head_snd == 0)  ? STEP_IN_GAIN  :
                     (head_snd == 1)  ? STEP_OUT_GAIN : BANG_GAIN;
 
-wire signed [25:0] m_mul = motor_s * $signed({1'b0, HUM_GAIN}) * $signed({1'b0, motor_env});
+wire signed [25:0] m_mul = motor_s * $signed({1'b0, MOTOR_GAIN}) * $signed({1'b0, motor_env});
 wire signed [25:0] h_mul = (head_s * $signed({1'b0, h_gain})) <<< 8;
 wire signed [25:0] sum   = (m_mul + h_mul) >>> OUT_SHIFT;
 

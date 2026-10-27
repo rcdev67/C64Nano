@@ -4,6 +4,7 @@ impl/pnr/**
 src/impl/gwsynthesis/**
 src/impl/temp/**
 src/impl/pnr/**
+src/impl/sim/**
 simulation/sim/**
 simulation/transcript
 impl/pnr/device.cfg
@@ -12,4 +13,4 @@ impl/pnr/device.cfg
 
 # ROM images are not ours to publish
 roms/
-preview_1541.wav
+

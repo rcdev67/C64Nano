@@ -256,6 +256,7 @@ signal ext_cycle_d    : std_logic;
 -- 1541 drive sound: what the drive does, and the sample it hands to the mixer.
 -- The recordings are in the bitstream, so there is no transport to arrange.
 signal snd_motor      : std_logic;
+signal snd_disk_in    : std_logic;
 signal snd_trk_in     : std_logic;
 signal snd_trk_out    : std_logic;
 signal snd_head_bang  : std_logic;
@@ -742,6 +743,7 @@ yes_c1541: if C1541 /= 0 generate
       c1541rom_data => c1541rom_data,
 
       snd_motor     => snd_motor,
+      snd_disk_in   => snd_disk_in,
       snd_trk_in    => snd_trk_in,
       snd_trk_out   => snd_trk_out,
       snd_head_bang => snd_head_bang
@@ -759,6 +761,7 @@ else generate
 	drive_iec_clk_o <= '1';
   ext_en <= '0';
   snd_motor <= '0';
+  snd_disk_in <= '0';
   snd_trk_in <= '0';
   snd_trk_out <= '0';
   snd_head_bang <= '0';
@@ -1608,6 +1611,8 @@ port map (
   resetn       => reset_n,
   tick_div     => snd_tick_div,
   motor_on     => snd_motor,
+  -- an empty drive hums, a disk in it slips against its sleeve
+  disk_in      => snd_disk_in,
   step_in      => snd_trk_in,
   step_out     => snd_trk_out,
   head_bang    => snd_head_bang,
