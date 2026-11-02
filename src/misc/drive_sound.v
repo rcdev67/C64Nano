@@ -31,13 +31,13 @@
 // Levels are set from the measured peaks after resampling. At the OSD's "Loud"
 // step, of 32767:
 //
-//   head against the end stop  peak 103  ->  about 22700
-//   step out / step in          32 / 26  ->  about 20500 / 20800
-//   slip, a disk in the drive         94  ->  about  9400
-//   hum, the drive running empty      26  ->  about  2600
+//   head against the end stop  peak 103  ->  about 25500
+//   step out / step in          32 / 26  ->  about 24300 / 25000
+//   slip, a disk in the drive         94  ->  about  6400
+//   hum, the drive running empty      26  ->  about  1800
 //
 // "Normal", the default, is half of that. The worst case is the bang landing on
-// a slip peak of the same sign, 32100, still below the clamp; the simulation
+// a slip peak of the same sign, 31900, still below the clamp; the simulation
 // runs at "Loud" and checks it.
 //
 // How they got here, because each step was a finding on the board. The first
@@ -52,6 +52,20 @@
 // steady noise is simply lost in it. The head channel got 6 dB more through
 // HEAD_SHIFT, the steps now stand at about twice the slip, and the bang, which
 // had the headroom to itself, came down to stay just the loudest.
+//
+// Still no clack, and probes on the board's LEDs showed the head channel
+// playing real samples at every track change. The levels were not the fault.
+// Gowin, given both products and their sum as one expression, lost the head on
+// the way -- see the mixing below. And the HDMI side took the audio word in a
+// race with its change, which turns every large jump of the sound into a
+// crack; it crackled like a campfire while the simulation played clean, and
+// with the motor muted those cracks had passed for clacks. See misc/video.v.
+// Along the way the slip went down 3.4 dB and the steps up 1.6, about 12 dB
+// between a clack and the running noise where there were 7.
+//
+// Clacks are rare during a load, and rightly so: a standard load reads a track
+// in about ten seconds, and a file next to the directory changes track only a
+// few times -- as on a real 1541.
 //
 // Both loops share one gain on purpose. They are on the same channel, and with
 // one gain the recording's own relation between them is kept: an empty drive is
@@ -69,10 +83,10 @@ module drive_sound #(
     parameter integer BANG_OFF      = 2112,
     parameter integer BANG_LEN      = 1088,
     parameter integer HEAD_LEN      = 3200,
-    parameter [7:0]   MOTOR_GAIN    = 8'd50,  // both loops, see above
-    parameter [7:0]   STEP_IN_GAIN  = 8'd200,
-    parameter [7:0]   STEP_OUT_GAIN = 8'd160,
-    parameter [7:0]   BANG_GAIN     = 8'd55,
+    parameter [7:0]   MOTOR_GAIN    = 8'd34,  // both loops, see above
+    parameter [7:0]   STEP_IN_GAIN  = 8'd240,
+    parameter [7:0]   STEP_OUT_GAIN = 8'd190,
+    parameter [7:0]   BANG_GAIN     = 8'd62,
     parameter integer HEAD_SHIFT    = 9,      // the head channel's extra 6 dB
     parameter integer OUT_SHIFT     = 7,
     // 150 ms of motor tail in samples, to bridge the gaps of a load
@@ -218,19 +232,38 @@ wire [7:0] h_gain = !head_active     ? 8'd0          :
                     (head_snd == 0)  ? STEP_IN_GAIN  :
                     (head_snd == 1)  ? STEP_OUT_GAIN : BANG_GAIN;
 
-wire signed [25:0] m_mul = motor_s * $signed({1'b0, MOTOR_GAIN}) * $signed({1'b0, motor_env});
-wire signed [25:0] h_mul = (head_s * $signed({1'b0, h_gain})) <<< HEAD_SHIFT;
-wire signed [25:0] sum   = (m_mul + h_mul) >>> OUT_SHIFT;
+// The products are registered, each on its own, and only then shifted and
+// added. Written as one expression, Gowin folded both products and their sum
+// into a single DSP block, and on the board the head never came out of it:
+// the LEDs showed the channel playing real samples, and nothing was heard. The
+// inputs only change on the tick, so the extra clock of latency is invisible.
+//
+// Each product is brought to the output scale before the sum, which keeps the
+// adder narrow -- the chip has a few dozen cells to spare, not a 26 bit adder.
+// It is exact: the head product, shifted up by HEAD_SHIFT, has nothing below
+// bit OUT_SHIFT that the shift down could lose.
+wire signed [16:0] head_x = head_s;
+wire signed [16:0] gain_x = {9'd0, h_gain};
+reg  signed [23:0] m_mul;
+reg  signed [16:0] h_mul;
+always @(posedge clk) begin
+    m_mul <= motor_s * $signed({1'b0, MOTOR_GAIN}) * $signed({1'b0, motor_env});
+    h_mul <= head_x * gain_x;
+end
+wire signed [18:0] m_out = m_mul >>> OUT_SHIFT;
+wire signed [18:0] h_w   = h_mul;
+wire signed [18:0] h_out = h_w <<< (HEAD_SHIFT - OUT_SHIFT);
+wire signed [18:0] sum   = m_out + h_out;
 
 // volume 0 mutes entirely, so it can be switched off from the OSD
-wire signed [25:0] scaled = (volume == 2'd0) ? 26'sd0 :
+wire signed [18:0] scaled = (volume == 2'd0) ? 19'sd0 :
                             (volume == 2'd1) ? (sum >>> 2) :
                             (volume == 2'd2) ? (sum >>> 1) : sum;
 
 // The measured peaks stay well inside 16 bits, but clamp rather than wrap: a
 // wrap is a click, and the mixer above us saturates only its own sum.
-wire signed [25:0] lim = (scaled >  26'sd32767) ?  26'sd32767 :
-                         (scaled < -26'sd32768) ? -26'sd32768 : scaled;
+wire signed [18:0] lim = (scaled >  19'sd32767) ?  19'sd32767 :
+                         (scaled < -19'sd32768) ? -19'sd32768 : scaled;
 
 // Registered output. The value only changes on the sample tick, but without
 // this register the multipliers, the adder and the volume mux sit on a

@@ -143,6 +143,21 @@ wire [15:0] audio_vol_r =
     (system_volume == 2'd2)?{ audio_r[15], audio_r[15:1] }:
     audio_r;
 
+// The hdmi module takes the audio word on the rising edge of clk_audio, and
+// clk_audio is a flip-flop on clk: its edge always comes just after an edge of
+// clk, when the audio word changes too. A sample taken in that race mixes old
+// and new bits. With the SID alone the word mostly moves by a few steps and
+// nobody hears it; the 1541 drive sound jumps by thousands once per sample, and
+// about 17 of those landed on the edge every second -- a campfire crackle on the
+// board, while the simulation of the sound played clean. So the word is held
+// from the falling edge on, half an audio period before it is taken.
+reg [15:0] audio_hold_l, audio_hold_r;
+always @(posedge clk)
+    if(aclk_cnt >= audio_div && clk_audio) begin
+        audio_hold_l <= audio_vol_l;
+        audio_hold_r <= audio_vol_r;
+    end
+
 hdmi #(
    .AUDIO_RATE(48000), 
    .AUDIO_BIT_WIDTH(16),
@@ -152,7 +167,7 @@ hdmi #(
   .clk_pixel_x5(clk_pixel_x5),
   .clk_pixel(clk),
   .clk_audio(clk_audio),
-  .audio_sample_word( { audio_vol_l, audio_vol_r } ),
+  .audio_sample_word( { audio_hold_l, audio_hold_r } ),
   .tmds(tmds),
   .tmds_clock(tmds_clock),
 
