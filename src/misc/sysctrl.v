@@ -32,6 +32,15 @@ module sysctrl (
   output reg        port_in_strobe,
   output reg [7:0]  port_in_data,
 
+  // port 1, the network port: the modem on the PMOD pins, for the
+  // companion's own download to the SD card, see net_port.v
+  input [7:0]       net_out_available,   // bytes from the modem waiting
+  output reg        net_out_strobe,
+  input [7:0]       net_out_data,
+  input [7:0]       net_in_available,    // free bytes towards the modem
+  output reg        net_in_strobe,
+  output reg [7:0]  net_in_data,
+
   // values that can be configured by the user
   output reg [1:0]  system_reu_cfg,
   output reg        system_reu_wrap,
@@ -61,6 +70,7 @@ module sysctrl (
   output reg [2:0]  system_sid_fc_offset,
   output reg        system_georam,
   output reg [1:0]  system_uart,
+  output reg        system_uart_net,     // "RS232 port: Netz", value 4
   output reg        system_joyswap,
   output reg        system_detach_reset,
   output reg [1:0]  system_shift_mod,
@@ -93,7 +103,12 @@ reg	  buttons_irq_enable;
 
 // the system cobtrol interrupt or any other interrupt (e,g sdc, hid, ...)
 // activates the interrupt line to the MCU by pulling it low
-assign int_out_n = (int_in != 8'h00 || sys_int)?1'b0:1'b1;
+// The network port raises the interrupt as a level, not an event: its
+// FIFO holds only 15 bytes. A rising-edge notification that is
+// acknowledged before the bytes are fetched leaves the FIFO full and
+// silent for good; our Atari ST core learnt that during downloads.
+wire net_pending = (net_out_available != 8'd0);
+assign int_out_n = (int_in != 8'h00 || sys_int || net_pending)?1'b0:1'b1;
 
 // by default system is in reset
 reg [1:0] main_reset = 2'b11; 
@@ -104,6 +119,7 @@ assign system_1541_reset = disk_reset;
 reg [31:0] main_reset_timeout;
 
 reg       port_out_availableD;
+reg       net_out_availableD;
 reg [7:0] port_cmd;
 reg [7:0] port_index;
 
@@ -164,6 +180,9 @@ always @(posedge clk) begin
       system_sid_fc_offset <= 3'b000;
       system_georam <= 1'b0;
       system_uart <= 2'b00;
+      system_uart_net <= 1'b0;
+      net_out_strobe <= 1'b0;
+      net_in_strobe <= 1'b0;
       system_joyswap <= 1'b0;
       system_detach_reset <= 1'b0;
       system_shift_mod <= 2'b00;
@@ -196,6 +215,8 @@ always @(posedge clk) begin
       int_ack <= 8'h00;
       port_out_strobe <= 1'b0;
       port_in_strobe <= 1'b0;
+      net_out_strobe <= 1'b0;
+      net_in_strobe <= 1'b0;
 
       // iack bit 0 acknowledges the coldboot notification
       if(int_ack[0]) sys_int <= 1'b0;      
@@ -204,6 +225,11 @@ always @(posedge clk) begin
       port_out_availableD <= (port_out_available != 8'd0);
 //    if((port_out_available != 8'd0) && !port_out_availableD)
       if(port_out_available && !port_out_availableD)
+	sys_int <= 1'b1;
+
+      // same for the network port, reported as its own interrupt source
+      net_out_availableD <= (net_out_available != 8'd0);
+      if(net_out_available && !net_out_availableD)
 	sys_int <= 1'b1;
       
       // monitor buttons for changes and raise interrupt
@@ -315,7 +341,7 @@ always @(posedge clk) begin
                     // GeoRAM
                     if(id == "#") system_georam <= data_in[0];
                     // RS232 UART port
-                    if(id == "*") system_uart <= data_in[1:0];
+                    if(id == "*") begin system_uart <= data_in[1:0]; system_uart_net <= data_in[2]; end
                     // Joystick swap port
                     if(id == "%") system_joyswap <= data_in[0];
                     // cartridge detach
@@ -352,7 +378,7 @@ always @(posedge clk) begin
 
 	        // interrupt[0] notifies the MCU of a FPGA cold boot e.g. if
                 // the FPGA has been loaded via USB
-                data_out <= { int_in[7:1], sys_int };
+                data_out <= { int_in[7:1], sys_int | net_pending };
             end
 
             // CMD 6: read system interrupt source
@@ -360,7 +386,8 @@ always @(posedge clk) begin
 	        // bit[0]: coldboot flag
 	        // bit[1]: port data is available
 	        // bit[2]: buttons state change has been detected
-                data_out <= { 5'b00000, !buttons_irq_enable, (port_out_available != 8'd0), coldboot };
+	        // bit[3]: network port data is available
+                data_out <= { 4'b0000, (net_out_available != 8'd0), !buttons_irq_enable, (port_out_available != 8'd0), coldboot };
 	        // reading the interrupt source acknowledges the coldboot notification
 	        if(state == 4'd0) coldboot <= 1'b0;            
 	    end
@@ -372,13 +399,31 @@ always @(posedge clk) begin
                if(state == 4'd0) begin
 		  // first byte is the subcommand
 		  port_cmd <= data_in;
-		  // return the number of ports implemented in this core
-		  data_out <= 8'd1;
+		  // return the number of ports implemented in this core:
+		  // 0 = the 6551, 1 = the network port
+		  data_out <= 8'd2;
 	       end else if(state == 4'd1) begin
 		  // second byte is the port index (if several ports are supported)
 		  port_index <= data_in;
-		  // return port type (currently supports only 0=serial)
-		  data_out <= 8'd0;
+		  // return port type, both are 0=serial; anything else is no port
+		  data_out <= (data_in < 8'd2) ? 8'd0 : 8'hff;
+	       end else if(port_index == 8'd1) begin
+		  // ... the network port mirrors port 0 with its own FIFOs. Its
+		  // status ends with the two counts: the companion reads no more
+		  // of it, and the bit rate is set from there, through "N".
+		  if(port_cmd == 8'd0) begin
+		     if(state == 4'd2)       data_out <= net_out_available;
+		     else if(state == 4'd3)  data_out <= net_in_available;
+		     else                    data_out <= 8'h00;
+		  end
+		  else if(port_cmd == 8'd1) begin
+		     data_out <= net_out_data;
+		     net_out_strobe <= data_in[0];
+		  end
+		  else if(port_cmd == 8'd2) begin
+		     net_in_data <= data_in;
+		     net_in_strobe <= 1'b1;
+		  end
 	       end else begin
 		  // ... further bytes are subcommand specific
 

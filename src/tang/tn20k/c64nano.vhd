@@ -15,7 +15,8 @@ entity c64nano_top is
   generic
   (
    DUAL  : integer := 1; -- 0:no, 1:yes dual SID build option
-   MIDI  : integer := 1; -- 0:no, 1:yes optional MIDI Interface
+   MIDI  : integer := 0; -- 0:no, 1:yes optional MIDI Interface; off to make room
+                         -- for the companion's network port, see net_port.v
    U6551 : integer := 1;  -- 0:no, 1:yes optional 6551 UART
    DIGIMAX : integer := 1;  -- 0:no, 1:yes optional DIGIMAX DAC
    REU   : integer := 1;  -- 0:no, 1:yes optional REU
@@ -457,6 +458,25 @@ signal sys_rx_strobe    : std_logic;
 signal sys_rx_data      : std_logic_vector(7 downto 0);
 signal sys_tx_available : std_logic_vector(7 downto 0);
 signal sys_rx_available : std_logic_vector(7 downto 0);
+-- "RS232 port: Netz" gives the external UART to the companion's port 1
+-- instead, for its download to the SD card, see net_port.v
+signal system_uart_net  : std_logic;
+signal ext_6551         : std_logic;
+signal net_bitrate      : std_logic_vector(23 downto 0);
+signal net_tx_used      : std_logic_vector(7 downto 0);
+signal net_tx_data      : std_logic_vector(7 downto 0);
+signal net_rx_space     : std_logic_vector(7 downto 0);
+signal net_tx_pop       : std_logic;
+signal net_rx_push      : std_logic;
+signal net_mcu_available : std_logic_vector(7 downto 0);
+signal net_mcu_data     : std_logic_vector(7 downto 0);
+signal net_mcu_strobe   : std_logic;
+signal net_mcu_space    : std_logic_vector(7 downto 0);
+signal net_mcu_in_data  : std_logic_vector(7 downto 0);
+signal net_mcu_in_strobe : std_logic;
+signal uart_tx_avail    : std_logic_vector(7 downto 0);
+signal uart_tx_data     : std_logic_vector(7 downto 0);
+signal uart_rx_space    : std_logic_vector(7 downto 0);
 signal shift_mod        : std_logic_vector(1 downto 0);
 signal usb_key          : std_logic_vector(7 downto 0);
 signal mod_key          : std_logic;
@@ -1378,6 +1398,7 @@ hid_inst: entity work.hid
   system_sid_fc_offset => sid_fc_offset,
   system_georam       => georam,
   system_uart         => system_uart,
+  system_uart_net     => system_uart_net,
   system_joyswap      => system_joyswap,
   system_detach_reset => detach_reset,
   system_shift_mod    => shift_mod,
@@ -1400,6 +1421,14 @@ hid_inst: entity work.hid
   port_in_available => sys_rx_available,
   port_in_strobe    => sys_rx_strobe,
   port_in_data      => sys_rx_data,
+
+  -- port 1, the network port, see net_port.v
+  net_out_available => net_mcu_available,
+  net_out_strobe    => net_mcu_strobe,
+  net_out_data      => net_mcu_data,
+  net_in_available  => net_mcu_space,
+  net_in_strobe     => net_mcu_in_strobe,
+  net_in_data       => net_mcu_in_data,
 
   int_out_n           => spi_intn,
   int_in              => unsigned'(x"0" & sdc_int & '0' & hid_int & '0'),
@@ -2237,14 +2266,54 @@ end process;
 -- This is the arrangement of our Atari ST core, and uart_ext.v is the same
 -- file: the 6551 here offers the same FIFO interface as the ST's MFP, and
 -- reports its bit rate in the same status word layout, byte swapped.
-uart_ext_en      <= '1' when system_uart = "11" else '0';
-serial_tx_strobe <= ext_tx_strobe when uart_ext_en = '1' else sys_tx_strobe;
-serial_rx_strobe <= ext_rx_strobe when uart_ext_en = '1' else sys_rx_strobe;
-serial_rx_data   <= ext_rx_data   when uart_ext_en = '1' else sys_rx_data;
-sys_tx_available <= (others => '0') when uart_ext_en = '1' else serial_tx_available;
-sys_rx_available <= (others => '0') when uart_ext_en = '1' else serial_rx_available;
-ext_tx_available <= serial_tx_available when uart_ext_en = '1' else (others => '0');
-ext_bitrate      <= serial_status(15 downto 8) & serial_status(23 downto 16) & serial_status(31 downto 24);
+--
+-- "RS232 port: Netz" (value 4) gives the same external UART to the
+-- companion's port 1 instead: its download talks to the modem, and the
+-- 6551 goes to the companion's port 0 as in the first three settings.
+-- One UART for both is enough, the C64 does not use the modem meanwhile.
+ext_6551         <= '1' when system_uart = "11" and system_uart_net = '0' else '0';
+uart_ext_en      <= ext_6551 or system_uart_net;
+serial_tx_strobe <= ext_tx_strobe when ext_6551 = '1' else sys_tx_strobe;
+serial_rx_strobe <= ext_rx_strobe when ext_6551 = '1' else sys_rx_strobe;
+serial_rx_data   <= ext_rx_data   when ext_6551 = '1' else sys_rx_data;
+sys_tx_available <= (others => '0') when ext_6551 = '1' else serial_tx_available;
+sys_rx_available <= (others => '0') when ext_6551 = '1' else serial_rx_available;
+ext_tx_available <= serial_tx_available when ext_6551 = '1' else (others => '0');
+ext_bitrate      <= net_bitrate when system_uart_net = '1' else
+                    serial_status(15 downto 8) & serial_status(23 downto 16) & serial_status(31 downto 24);
+uart_tx_avail    <= net_tx_used  when system_uart_net = '1' else ext_tx_available;
+uart_tx_data     <= net_tx_data  when system_uart_net = '1' else serial_tx_data;
+uart_rx_space    <= net_rx_space when system_uart_net = '1' else serial_rx_available;
+net_tx_pop       <= ext_tx_strobe and system_uart_net;
+net_rx_push      <= ext_rx_strobe and system_uart_net;
+
+-- The companion sets the network port's bit rate through "N", the MIDI
+-- mode, which is free here without MIDI: 0 = 19200, what Zimodem talks
+-- after a reset, up to 4 = 460800.
+net_bitrate <= x"070800" when st_midi = "100" else  -- 460800
+               x"01C200" when st_midi = "011" else  -- 115200
+               x"00E100" when st_midi = "010" else  -- 57600
+               x"009600" when st_midi = "001" else  -- 38400
+               x"004B00";                           -- 19200
+
+net_port_inst : entity work.net_port
+port map (
+  clk               => clk_sys,
+  reset             => not pll_locked_hid,
+  enable            => system_uart_net,
+  mcu_available     => net_mcu_available,
+  mcu_data          => net_mcu_data,
+  mcu_strobe        => net_mcu_strobe,
+  mcu_space         => net_mcu_space,
+  mcu_in_data       => net_mcu_in_data,
+  mcu_in_strobe     => net_mcu_in_strobe,
+  uart_tx_available => net_tx_used,
+  uart_tx_data      => net_tx_data,
+  uart_tx_strobe    => net_tx_pop,
+  uart_rx_space     => net_rx_space,
+  uart_rx_data      => ext_rx_data,
+  uart_rx_strobe    => net_rx_push
+);
 
 -- |SwiftLink       $DE00/$DF00/$D700/NMI (38400 baud)
 yes_uart: if U6551 /= 0 generate
@@ -2296,10 +2365,10 @@ port map (
   resetn       => reset_n,
   enable       => uart_ext_en,
   bitrate      => ext_bitrate,
-  tx_available => ext_tx_available,
-  tx_data      => serial_tx_data,
+  tx_available => uart_tx_avail,
+  tx_data      => uart_tx_data,
   tx_strobe    => ext_tx_strobe,
-  rx_space     => serial_rx_available,
+  rx_space     => uart_rx_space,
   rx_data      => ext_rx_data,
   rx_strobe    => ext_rx_strobe,
   txd          => ext_txd,
