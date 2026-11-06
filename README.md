@@ -14,6 +14,27 @@ The C64Nano is a port of some [MiST](https://github.com/mist-devel/mist-board/wi
 | [Tang Console 60K NEO](https://wiki.sipeed.com/hardware/en/tang/tang-console/mega-console.html)|[GW5AT-60](https://www.gowinsemi.com/en/product/detail/60/) | HDMI / LCD |Retro D9 Joystick|
 | [Tang Console 138K NEO](https://wiki.sipeed.com/hardware/en/tang/tang-console/mega-console.html)|[GW5AST-138](https://www.gowinsemi.com/en/product/detail/60/)|HDMI / LCD | Retro D9 Joystick|
 
+## This fork (branch `nano20k-running`, Tang Nano 20K)
+
+What runs on a Tang Nano 20K with its onboard BL616 and the
+[FPGA-Companion fork](https://github.com/rcdev67/FPGA-Companion) (branch
+`net-download`), built and flashed with
+[MISTrcdev](https://github.com/rcdev67/MISTrcdev). What it adds to upstream:
+
+- **1541 drive sounds** from the 1541 Ultimate's recordings: motor, the
+  slip of the disk, head steps, the bang at track 0, gated on real drive
+  activity, in the bitstream.
+- **A WiFi modem on the PMOD pins**, an ESP32-S3 with Zimodem behind the
+  6551 (SwiftLink), and **RS232 port: Netz**, the same modem as the
+  companion's port 1 for files from a server onto the SD card. MIDI is off
+  on the Nano 20K to make room for it.
+- A PRG start leaves the 1541 alone; HDMI audio no longer crackles; the SD
+  status reports a finished MCU read.
+
+Only the Tang Nano 20K is built and tested here. What the whole setup does
+better and worse than upstream is in
+[MISTrcdev/DIFFERENCES.md](https://github.com/rcdev67/MISTrcdev/blob/main/DIFFERENCES.md).
+
 This project relies on a MPU being connected to the FPGA. --> [MiSTle-Dev wiki](https://github.com/MiSTle-Dev/.github/wiki) <--  
 
 > [!NOTE]
